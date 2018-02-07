@@ -26,3 +26,11 @@ end
 dashboard -layout source assembly registers stack
 alias db=dashboard
 db -style syntax_highlighting 'monokai'
+
+# make sure db output is updated when we go up and down the call stack
+define hookpost-up
+db
+end
+define hookpost-down
+db
+end
