@@ -1,36 +1,53 @@
 python
-import libtmux
 import subprocess as sp
 import os
-import time
 
-def get_active_session_id():
-    return "$%s" % os.environ['TMUX'].split(',')[-1]
+NULLPROG = "sh -c 'while [ 1 == 1 ]; do sleep 100; done'"
 
-tmux_server = libtmux.Server()
-tmux = tmux_server.get_by_id(get_active_session_id())
+def tmux(*args):
+    return sp.check_output(['tmux'] + list(args)).decode('utf8')
 
-tmux.attached_window.set_window_option('remain-on-exit', 1)
-dashboard_pane = tmux.attached_window.split_window(attach=False, vertical=False)
-dashboard_pane.cmd('respawn-pane', '-k', 'cat')
-tmux_server._update_panes()
-gdb.execute('dashboard -output %s' % (dashboard_pane.get('pane_tty'),))
+def set_title(tty, title):
+    with open(tty, 'ab') as t:
+        t.write(b'\x1b]2;' + title.encode('utf8') + b'\x1b\\')
 
-app_pane = tmux.attached_window.split_window(attach=False, vertical=True)
-app_pane.cmd('respawn-pane', '-k', 'sleep', '999d')
-tmux_server._update_panes()
-tty = app_pane.get('pane_tty')
-gdb.execute('tty %s' % (tty,))
+tmux('setw', 'remain-on-exit', 'on')
+gdb_pane, gdb_tty = tmux('display-message', '-p' , '-F', '#{pane_id},#{pane_tty}').strip().split(',')
+set_title(gdb_tty, 'gdb')
+
+dashboard_pane, dashboard_tty = tmux('split-window', '-d', '-h', '-P', '-F', '#{pane_id},#{pane_tty}', NULLPROG).strip().split(',')
+sp.check_call(['stty', '--file', dashboard_tty, '-echo'])
+set_title(dashboard_tty, 'dashboard')
+gdb.execute(f'dashboard -output {dashboard_tty}')
+
+app_pane, app_tty = tmux('split-window', '-d', '-v', '-P', '-F', '#{pane_id},#{pane_tty}', NULLPROG).strip().split(',')
+set_title(app_tty, 'inferior')
+gdb.execute(f'set inferior-tty {app_tty}')
+
 end
 
 dashboard -layout source assembly registers stack
-alias db=dashboard
-db -style syntax_highlighting 'monokai'
+dashboard -enabled on
+dashboard -style syntax_highlighting 'monokai'
 
-# make sure db output is updated when we go up and down the call stack
+# make sure dashboard output is updated when gdb state changes
 define hookpost-up
-db
+dashboard
 end
 define hookpost-down
-db
+dashboard
 end
+define hookpost-thread
+dashboard
+end
+define hookpost-delete
+dashboard
+end
+define hookpost-clear
+dashboard
+end
+define hookpost-break
+dashboard
+end
+
+# vim: set ft=python:
